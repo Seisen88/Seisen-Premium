@@ -30,6 +30,16 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: 'Roblox username is required' }, { status: 400 });
         }
 
+        if (requestedTier && ['weekly', 'monthly', 'lifetime'].includes(String(requestedTier).toLowerCase())) {
+            const preCheckStock = await db.getPremiumStock(String(requestedTier).toLowerCase());
+            if (preCheckStock <= 0) {
+                return NextResponse.json({
+                    success: false,
+                    error: 'This premium plan is out of stock'
+                }, { status: 409 });
+            }
+        }
+
         console.log(`🎮 Verifying Roblox purchase for username: ${username}, Target Tier: ${requestedTier || 'Any'}`);
 
         // Verify the user owns the product
@@ -140,6 +150,13 @@ export async function POST(req: Request) {
         const robuxAmount = robuxPriceMap[tier] ?? 0;
 
         // Processing New Purchase OR Renewal
+        const stockDecremented = await db.decrementPremiumStock(tier);
+        if (!stockDecremented) {
+            return NextResponse.json({
+                success: false,
+                error: 'This premium plan is out of stock'
+            }, { status: 409 });
+        }
         
         // 1. Save / Update Payment Record
         if (!isRenewal && !isDuplicate) {

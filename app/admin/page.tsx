@@ -39,6 +39,8 @@ interface Stats {
   robloxRevenue: number;
 }
 
+type PremiumTier = 'weekly' | 'monthly' | 'lifetime';
+
 export default function AdminPage() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [password, setPassword] = useState('');
@@ -58,9 +60,24 @@ export default function AdminPage() {
   const [saving, setSaving] = useState<string | null>(null);
   const [scriptSearch, setScriptSearch] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
+  const [paymentsPage, setPaymentsPage] = useState(1);
+  const [ticketsPage, setTicketsPage] = useState(1);
   const [selectedScript, setSelectedScript] = useState<any | null>(null);
   const [bulkFeatures, setBulkFeatures] = useState('');
+  const [premiumStock, setPremiumStock] = useState<Record<PremiumTier, number>>({
+    weekly: 0,
+    monthly: 0,
+    lifetime: 0,
+  });
+  const [stockDraft, setStockDraft] = useState<Record<PremiumTier, string>>({
+    weekly: '0',
+    monthly: '0',
+    lifetime: '0',
+  });
+  const [stockLoading, setStockLoading] = useState(false);
+  const [savingStockTier, setSavingStockTier] = useState<PremiumTier | null>(null);
   const ITEMS_PER_PAGE = 5;
+  const TABLE_ITEMS_PER_PAGE = 10;
 
   useEffect(() => {
     const token = localStorage.getItem('adminToken');
@@ -100,11 +117,90 @@ export default function AdminPage() {
       if (ticketData.success) {
         setTickets(ticketData.tickets);
       }
+
+      await fetchPremiumStock(token);
     } catch (err) {
       console.error(err);
       setError('Failed to load dashboard data');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const fetchPremiumStock = async (token: string) => {
+    try {
+      setStockLoading(true);
+      const res = await fetch(`${getApiUrl()}/api/admin/premium-stock`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (!res.ok) throw new Error('Failed to fetch premium stock');
+
+      const data = await res.json();
+      const stocks = data?.stocks || {};
+      const normalized = {
+        weekly: Number(stocks.weekly || 0),
+        monthly: Number(stocks.monthly || 0),
+        lifetime: Number(stocks.lifetime || 0),
+      };
+
+      setPremiumStock(normalized);
+      setStockDraft({
+        weekly: String(normalized.weekly),
+        monthly: String(normalized.monthly),
+        lifetime: String(normalized.lifetime),
+      });
+    } catch (error) {
+      console.error('Error fetching premium stock:', error);
+    } finally {
+      setStockLoading(false);
+    }
+  };
+
+  const saveStock = async (tier: PremiumTier) => {
+    try {
+      const token = localStorage.getItem('adminToken');
+      if (!token) return;
+
+      const value = Number(stockDraft[tier]);
+      if (!Number.isInteger(value) || value < 0) {
+        alert('Stock must be a non-negative integer.');
+        return;
+      }
+
+      setSavingStockTier(tier);
+      const res = await fetch(`${getApiUrl()}/api/admin/premium-stock`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ tier, stock: value }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Failed to update stock');
+
+      const updated = {
+        weekly: Number(data.stocks.weekly || 0),
+        monthly: Number(data.stocks.monthly || 0),
+        lifetime: Number(data.stocks.lifetime || 0),
+      };
+
+      setPremiumStock(updated);
+      setStockDraft({
+        weekly: String(updated.weekly),
+        monthly: String(updated.monthly),
+        lifetime: String(updated.lifetime),
+      });
+    } catch (error) {
+      console.error('Error saving stock:', error);
+      const message = error instanceof Error ? error.message : 'Failed to save stock';
+      alert(message);
+    } finally {
+      setSavingStockTier(null);
     }
   };
 
@@ -301,6 +397,30 @@ export default function AdminPage() {
     );
   });
 
+  const totalPaymentPages = Math.max(1, Math.ceil(filteredPayments.length / TABLE_ITEMS_PER_PAGE));
+  const paginatedPayments = filteredPayments.slice(
+    (paymentsPage - 1) * TABLE_ITEMS_PER_PAGE,
+    paymentsPage * TABLE_ITEMS_PER_PAGE
+  );
+
+  const totalTicketPages = Math.max(1, Math.ceil(tickets.length / TABLE_ITEMS_PER_PAGE));
+  const paginatedTickets = tickets.slice(
+    (ticketsPage - 1) * TABLE_ITEMS_PER_PAGE,
+    ticketsPage * TABLE_ITEMS_PER_PAGE
+  );
+
+  useEffect(() => {
+    setPaymentsPage(1);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    setPaymentsPage(1);
+  }, [payments.length]);
+
+  useEffect(() => {
+    setTicketsPage(1);
+  }, [tickets.length]);
+
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen flex items-center justify-center px-4">
@@ -412,7 +532,10 @@ export default function AdminPage() {
                     type="text"
                     placeholder="Search by email, username, transaction ID..."
                     value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onChange={(e) => {
+                      setSearchQuery(e.target.value);
+                      setPaymentsPage(1);
+                    }}
                     className="w-full pl-10 pr-4 py-3 bg-[#141414] border border-[#2a2a2a] rounded-lg text-white placeholder:text-gray-500 focus:outline-none focus:border-emerald-500/50"
                 />
             </div>
@@ -436,17 +559,17 @@ export default function AdminPage() {
                   <tbody className="divide-y divide-[#1f1f1f]">
                     {isLoading ? (
                         <tr>
-                            <td colSpan={7} className="p-8 text-center text-gray-500">
+                        <td colSpan={8} className="p-8 text-center text-gray-500">
                                 <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2" />
                                 Loading data...
                             </td>
                         </tr>
                     ) : filteredPayments.length === 0 ? (
                         <tr>
-                            <td colSpan={7} className="p-8 text-center text-gray-500">No payments found</td>
+                        <td colSpan={8} className="p-8 text-center text-gray-500">No payments found</td>
                         </tr>
                     ) : (
-                        filteredPayments.map((p) => {
+                      paginatedPayments.map((p) => {
                             let key = 'N/A';
                             try {
                                 if (Array.isArray(p.generated_keys) && p.generated_keys.length > 0) key = p.generated_keys[0];
@@ -513,6 +636,47 @@ export default function AdminPage() {
                   </tbody>
                 </table>
               </div>
+
+              {filteredPayments.length > 0 && totalPaymentPages > 1 && (
+                <div className="flex items-center justify-between p-4 border-t border-[#1f1f1f]">
+                  <div className="text-sm text-gray-500">
+                    Showing {((paymentsPage - 1) * TABLE_ITEMS_PER_PAGE) + 1} to {Math.min(paymentsPage * TABLE_ITEMS_PER_PAGE, filteredPayments.length)} of {filteredPayments.length} payments
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      onClick={() => setPaymentsPage((p) => Math.max(1, p - 1))}
+                      disabled={paymentsPage === 1}
+                      size="sm"
+                      variant="secondary"
+                    >
+                      Previous
+                    </Button>
+                    <div className="flex items-center gap-1">
+                      {Array.from({ length: totalPaymentPages }, (_, i) => i + 1).map((page) => (
+                        <button
+                          key={page}
+                          onClick={() => setPaymentsPage(page)}
+                          className={`px-3 py-1 rounded text-sm ${
+                            paymentsPage === page
+                              ? 'bg-emerald-500 text-white'
+                              : 'bg-[#1a1a1a] text-gray-400 hover:bg-[#252525]'
+                          }`}
+                        >
+                          {page}
+                        </button>
+                      ))}
+                    </div>
+                    <Button
+                      onClick={() => setPaymentsPage((p) => Math.min(totalPaymentPages, p + 1))}
+                      disabled={paymentsPage === totalPaymentPages}
+                      size="sm"
+                      variant="secondary"
+                    >
+                      Next
+                    </Button>
+                  </div>
+                </div>
+              )}
             </Card>
           </div>
         )}
@@ -538,7 +702,7 @@ export default function AdminPage() {
                             <td colSpan={6} className="p-8 text-center text-gray-500">No tickets found</td>
                         </tr>
                     ) : (
-                        tickets.map((t) => (
+                      paginatedTickets.map((t) => (
                             <tr key={t.id} className="hover:bg-[#1a1a1a] transition-colors">
                                 <td className="p-4 text-white font-mono">{t.ticket_number}</td>
                                 <td className="p-4">
@@ -572,6 +736,47 @@ export default function AdminPage() {
                   </tbody>
                 </table>
               </div>
+
+              {tickets.length > 0 && totalTicketPages > 1 && (
+                <div className="flex items-center justify-between p-4 border-t border-[#1f1f1f]">
+                  <div className="text-sm text-gray-500">
+                    Showing {((ticketsPage - 1) * TABLE_ITEMS_PER_PAGE) + 1} to {Math.min(ticketsPage * TABLE_ITEMS_PER_PAGE, tickets.length)} of {tickets.length} tickets
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      onClick={() => setTicketsPage((p) => Math.max(1, p - 1))}
+                      disabled={ticketsPage === 1}
+                      size="sm"
+                      variant="secondary"
+                    >
+                      Previous
+                    </Button>
+                    <div className="flex items-center gap-1">
+                      {Array.from({ length: totalTicketPages }, (_, i) => i + 1).map((page) => (
+                        <button
+                          key={page}
+                          onClick={() => setTicketsPage(page)}
+                          className={`px-3 py-1 rounded text-sm ${
+                            ticketsPage === page
+                              ? 'bg-emerald-500 text-white'
+                              : 'bg-[#1a1a1a] text-gray-400 hover:bg-[#252525]'
+                          }`}
+                        >
+                          {page}
+                        </button>
+                      ))}
+                    </div>
+                    <Button
+                      onClick={() => setTicketsPage((p) => Math.min(totalTicketPages, p + 1))}
+                      disabled={ticketsPage === totalTicketPages}
+                      size="sm"
+                      variant="secondary"
+                    >
+                      Next
+                    </Button>
+                  </div>
+                </div>
+              )}
             </Card>
           </div>
         )}
@@ -877,10 +1082,48 @@ export default function AdminPage() {
 
 
         {activeTab === 'settings' && (
-          <Card className="p-6 text-center">
-            <Settings className="w-12 h-12 text-gray-700 mx-auto mb-4" />
-            <h3 className="text-lg font-semibold text-white mb-2">Settings Incoming</h3>
-            <p className="text-gray-500">Global configuration features will be available in the next update.</p>
+          <Card className="p-6 space-y-6">
+            <div>
+              <h3 className="text-lg font-semibold text-white mb-1">Premium Stock Management</h3>
+              <p className="text-gray-500 text-sm">Set available stock for each premium tier. Out-of-stock tiers are automatically disabled on the premium page.</p>
+            </div>
+
+            {stockLoading ? (
+              <div className="text-gray-400 text-sm flex items-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Loading stock...
+              </div>
+            ) : (
+              <div className="grid md:grid-cols-3 gap-4">
+                {(['weekly', 'monthly', 'lifetime'] as PremiumTier[]).map((tier) => (
+                  <div key={tier} className="bg-[#101010] border border-[#2a2a2a] rounded-xl p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-white font-semibold capitalize">{tier}</p>
+                      <span className={`text-xs px-2 py-1 rounded border ${premiumStock[tier] > 0 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-red-500/10 text-red-400 border-red-500/30'}`}>
+                        {premiumStock[tier] > 0 ? 'In Stock' : 'Out of Stock'}
+                      </span>
+                    </div>
+
+                    <input
+                      type="number"
+                      min={0}
+                      value={stockDraft[tier]}
+                      onChange={(e) => setStockDraft((prev) => ({ ...prev, [tier]: e.target.value }))}
+                      className="w-full p-2.5 bg-[#141414] border border-[#2a2a2a] rounded-lg text-white focus:outline-none focus:border-emerald-500/50"
+                    />
+
+                    <Button
+                      className="w-full"
+                      onClick={() => saveStock(tier)}
+                      disabled={savingStockTier === tier}
+                    >
+                      {savingStockTier === tier ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                      Save Stock
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
           </Card>
         )}
       </div>

@@ -85,6 +85,11 @@ export async function POST(req: NextRequest) {
         // Fall through to generate keys again!
     }
 
+    const stockDecremented = await db.decrementPremiumStock(paymentInfo.tier);
+    if (!stockDecremented) {
+        console.warn(`⚠️ Could not decrement stock for tier ${paymentInfo.tier}. The order will still be fulfilled.`);
+    }
+
     // Determine validity based on tier (Legacy Logic)
     const validityMap: Record<string, number> = {
         weekly: 168,

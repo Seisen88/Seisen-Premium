@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PayPalSDK } from '@/lib/server/paypal';
 import { VatCalculator } from '@/lib/server/vat';
+import { TicketDatabase } from '@/lib/server/db';
 
 export async function POST(req: NextRequest) {
   try {
@@ -17,6 +18,12 @@ export async function POST(req: NextRequest) {
     if (!tier || !pricing[tier]) {
          return NextResponse.json({ error: 'Invalid tier' }, { status: 400 });
     }
+
+        const db = new TicketDatabase();
+        const currentStock = await db.getPremiumStock(tier);
+        if (currentStock <= 0) {
+            return NextResponse.json({ error: 'This premium plan is out of stock' }, { status: 409 });
+        }
 
     const baseAmount = pricing[tier];
 

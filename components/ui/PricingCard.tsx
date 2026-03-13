@@ -17,6 +17,9 @@ interface PricingCardProps {
   onButtonClick?: () => void;
   badgeVariant?: 'default' | 'best-value';
   priceIcon?: React.ReactNode;
+  stockStatusText?: string;
+  stockStatusVariant?: 'in-stock' | 'low-stock' | 'out-of-stock';
+  isOutOfStock?: boolean;
 }
 
 export default function PricingCard({
@@ -34,7 +37,17 @@ export default function PricingCard({
   badgeVariant = 'default',
   priceIcon,
   originalPrice,
+  stockStatusText,
+  stockStatusVariant = 'in-stock',
+  isOutOfStock = false,
 }: PricingCardProps) {
+  const stockStatusStyles =
+    stockStatusVariant === 'out-of-stock'
+      ? 'bg-red-500/15 text-red-300 border-red-500/30'
+      : stockStatusVariant === 'low-stock'
+        ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+        : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
+
   return (
     <Card
       variant={featured ? 'featured' : 'hover'}
@@ -100,12 +113,19 @@ export default function PricingCard({
         ))}
       </ul>
 
+      {stockStatusText && (
+        <div className={`mb-4 text-xs font-medium border rounded-lg px-3 py-2 text-center ${stockStatusStyles}`}>
+          {stockStatusText}
+        </div>
+      )}
+
       {/* Button */}
       <Button
         variant={featured ? 'primary' : 'secondary'}
         size="lg"
         className="w-full"
         onClick={onButtonClick}
+        disabled={isOutOfStock}
       >
         {buttonIcon}
         {buttonText}

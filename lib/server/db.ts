@@ -1,17 +1,18 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 // Initialize Supabase Client
-const supabaseUrl = process.env.SUPABASE_URL || '';
-const supabaseKey = process.env.SUPABASE_ANON_KEY || '';
+const supabaseUrl = process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || 'public-anon-key-placeholder';
 
-if (!supabaseUrl || !supabaseKey) {
-  console.warn('⚠️ Supabase credentials not found in environment variables');
+if (!process.env.SUPABASE_URL || (!process.env.SUPABASE_SERVICE_ROLE_KEY && !process.env.SUPABASE_ANON_KEY)) {
+  console.warn('⚠️ Supabase credentials not found in environment variables. Using placeholder client; database requests will fail until env vars are set.');
 }
 
 export const supabase = createClient(supabaseUrl, supabaseKey);
 
 export class TicketDatabase {
   private client: SupabaseClient;
+  private readonly premiumTiers = ['weekly', 'monthly', 'lifetime'];
 
   constructor() {
     this.client = supabase;
@@ -315,6 +316,155 @@ export class TicketDatabase {
       return 0;
     }
     return count || 0;
+  }
+
+  // --- Premium Stock Methods ---
+  private normalizeTier(tier: string) {
+    const normalized = (tier || '').toLowerCase();
+    return this.premiumTiers.includes(normalized) ? normalized : null;
+  }
+
+  private async ensurePremiumStockRows() {
+    const { data, error } = await this.client
+      .from('premium_stock')
+      .select('tier');
+
+    if (error) {
+      console.error('Error reading premium stock rows:', error);
+      return;
+    }
+
+    const existing = new Set((data || []).map((row: any) => row.tier));
+    const missing = this.premiumTiers
+      .filter((tier) => !existing.has(tier))
+      .map((tier) => ({ tier, stock: 100 }));
+
+    if (missing.length > 0) {
+      const { error: insertError } = await this.client
+        .from('premium_stock')
+        .insert(missing);
+
+      if (insertError) {
+        console.error('Error creating default premium stock rows:', insertError);
+      }
+    }
+  }
+
+  async getPremiumStocks(): Promise<Record<string, number>> {
+    await this.ensurePremiumStockRows();
+
+    const fallback = { weekly: 0, monthly: 0, lifetime: 0 };
+
+    const { data, error } = await this.client
+      .from('premium_stock')
+      .select('tier, stock');
+
+    if (error) {
+      console.error('Error fetching premium stocks:', error);
+      return fallback;
+    }
+
+    const map = { ...fallback };
+    for (const row of data || []) {
+      if (this.premiumTiers.includes(row.tier)) {
+        map[row.tier as 'weekly' | 'monthly' | 'lifetime'] = Number(row.stock || 0);
+      }
+    }
+
+    return map;
+  }
+
+  async getPremiumStock(tier: string): Promise<number> {
+    const normalizedTier = this.normalizeTier(tier);
+    if (!normalizedTier) return 0;
+
+    await this.ensurePremiumStockRows();
+
+    const { data, error } = await this.client
+      .from('premium_stock')
+      .select('stock')
+      .eq('tier', normalizedTier)
+      .single();
+
+    if (error) {
+      console.error('Error fetching premium stock for tier:', normalizedTier, error);
+      return 0;
+    }
+
+    return Number(data?.stock || 0);
+  }
+
+  async setPremiumStock(tier: string, stock: number) {
+    const normalizedTier = this.normalizeTier(tier);
+    if (!normalizedTier) {
+      throw new Error('Invalid tier');
+    }
+
+    const safeStock = Number.isFinite(stock) ? Math.max(0, Math.floor(stock)) : 0;
+
+    const { data, error } = await this.client
+      .from('premium_stock')
+      .upsert({
+        tier: normalizedTier,
+        stock: safeStock,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'tier' })
+      .select('tier, stock')
+      .single();
+
+    if (error) {
+      console.error('Error setting premium stock:', error);
+      throw error;
+    }
+
+    return data;
+  }
+
+  async decrementPremiumStock(tier: string): Promise<boolean> {
+    const normalizedTier = this.normalizeTier(tier);
+    if (!normalizedTier) return false;
+
+    await this.ensurePremiumStockRows();
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const { data: current, error: readError } = await this.client
+        .from('premium_stock')
+        .select('stock')
+        .eq('tier', normalizedTier)
+        .single();
+
+      if (readError) {
+        console.error('Error reading stock before decrement:', readError);
+        return false;
+      }
+
+      const currentStock = Number(current?.stock || 0);
+      if (currentStock <= 0) {
+        return false;
+      }
+
+      const { data: updated, error: updateError } = await this.client
+        .from('premium_stock')
+        .update({
+          stock: currentStock - 1,
+          updated_at: new Date().toISOString()
+        })
+        .eq('tier', normalizedTier)
+        .eq('stock', currentStock)
+        .select('tier')
+        .maybeSingle();
+
+      if (updateError) {
+        console.error('Error decrementing premium stock:', updateError);
+        return false;
+      }
+
+      if (updated) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   // --- Visitor Stats ---

@@ -11,6 +11,8 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 
 type PaymentMethod = 'paypal' | 'robux' | 'gcash';
+type PremiumTier = 'weekly' | 'monthly' | 'lifetime';
+type PremiumStockMap = Record<PremiumTier, number>;
 
 // ... (Plans data same as before, I will include them to be safe)
 const paypalPlans = [
@@ -30,7 +32,6 @@ const paypalPlans = [
     currency: '€',
     period: '/month',
     features: ['All premium scripts', 'No key system', 'Priority support', 'Early access', 'Exclusive updates'],
-    featured: true,
     plan: 'monthly',
   },
   {
@@ -41,6 +42,7 @@ const paypalPlans = [
     originalPrice: 12,
     badge: '17% OFF',
     badgeVariant: 'best-value' as const,
+    featured: true,
   },
 ];
 
@@ -61,7 +63,6 @@ const robuxPlans = [
     currency: '',
     period: '',
     features: ['All premium scripts', 'No key system', 'Priority support', 'Early access', 'Exclusive updates'],
-    featured: true,
     plan: 'monthly',
   },
   {
@@ -74,6 +75,7 @@ const robuxPlans = [
     period: '',
     features: ['All premium scripts', 'No key system', 'Priority support', 'Early access', 'Exclusive updates', 'Lifetime access'],
     plan: 'lifetime',
+    featured: true,
   },
 ];
 
@@ -94,7 +96,6 @@ const gcashPlans = [
     currency: '₱',
     period: '/month',
     features: ['All premium scripts', 'No key system', 'Priority support', 'Early access', 'Exclusive updates'],
-    featured: true,
     plan: 'monthly',
   },
   {
@@ -107,6 +108,7 @@ const gcashPlans = [
     period: 'one-time',
     features: ['All premium scripts', 'No key system', 'Priority support', 'Early access', 'Exclusive updates', 'Lifetime access'],
     plan: 'lifetime',
+    featured: true,
   },
 ];
 
@@ -152,6 +154,8 @@ function PremiumContent() {
       message: string;
       details?: string;
   }>({ isOpen: false, type: 'success', title: '', message: '' });
+  const [stockMap, setStockMap] = useState<PremiumStockMap>({ weekly: 0, monthly: 0, lifetime: 0 });
+  const [stockLoading, setStockLoading] = useState(true);
 
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -165,6 +169,37 @@ function PremiumContent() {
       capturePayPalOrder(token);
     }
   }, [searchParams]);
+
+  const loadPremiumStocks = async () => {
+    try {
+      const response = await fetch('/api/premium-stock', { cache: 'no-store' });
+      if (!response.ok) throw new Error('Failed to load stock');
+
+      const data = await response.json();
+      if (data?.stocks) {
+        setStockMap({
+          weekly: Number(data.stocks.weekly || 0),
+          monthly: Number(data.stocks.monthly || 0),
+          lifetime: Number(data.stocks.lifetime || 0),
+        });
+      }
+    } catch (error) {
+      console.error('Failed to load premium stocks:', error);
+    } finally {
+      setStockLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadPremiumStocks();
+  }, []);
+
+  const getTierStock = (tier: string) => {
+    if (tier === 'weekly' || tier === 'monthly' || tier === 'lifetime') {
+      return stockMap[tier];
+    }
+    return 0;
+  };
 
   const capturePayPalOrder = async (orderId: string) => {
     setIsProcessing(true);
@@ -254,6 +289,16 @@ function PremiumContent() {
 
 
   const handleRobuxPayment = (plan: string, price: number) => {
+      if (getTierStock(plan) <= 0) {
+        setStatusModal({
+          isOpen: true,
+          type: 'error',
+          title: 'Out of Stock',
+          message: 'This premium plan is currently out of stock.'
+        });
+        return;
+      }
+
       let productId = 16906166414; // Default Lifetime
       if (plan === 'weekly') productId = 16902313522;
       if (plan === 'monthly') productId = 16902308978;
@@ -329,6 +374,8 @@ function PremiumContent() {
                  router.push(`/success?${params.toString()}`);
              }, 1000);
 
+               loadPremiumStocks();
+
         } else {
              setStatusModal({
                  isOpen: true,
@@ -353,11 +400,31 @@ function PremiumContent() {
   };
 
   const handlePayPalPayment = (plan: string, amount: number) => {
+    if (getTierStock(plan) <= 0) {
+      setStatusModal({
+        isOpen: true,
+        type: 'error',
+        title: 'Out of Stock',
+        message: 'This premium plan is currently out of stock.'
+      });
+      return;
+    }
+
     setPendingPlan({ plan, amount, price: amount });
     setShowTosModal(true);
   };
 
   const handleTicketPayment = (plan: string, amount: number, currency: string) => {
+    if (getTierStock(plan) <= 0) {
+      setStatusModal({
+        isOpen: true,
+        type: 'error',
+        title: 'Out of Stock',
+        message: 'This premium plan is currently out of stock.'
+      });
+      return;
+    }
+
     setTicketDetails({ plan, amount, currency });
     setPendingPlan({ plan, amount, price: amount }); // Just for TOS context
     setShowTosModal(true);
@@ -386,6 +453,19 @@ function PremiumContent() {
             });
             
             const data = await response.json();
+
+            if (!response.ok) {
+              setIsProcessing(false);
+              setStatusModal({
+                  isOpen: true,
+                  type: 'error',
+                  title: 'Purchase Blocked',
+                  message: data.error || 'Unable to continue checkout.',
+              });
+              loadPremiumStocks();
+              return;
+            }
+
             const approvalLink = data.links?.find((link: any) => link.rel === 'approve');
             
             if (approvalLink) {
@@ -507,6 +587,16 @@ function PremiumContent() {
         {/* Pricing Cards */}
         <section className="grid md:grid-cols-3 gap-6">
           {getCurrentPlans().map((plan) => (
+            (() => {
+              const tierStock = getTierStock(plan.plan);
+              const isOutOfStock = !stockLoading && tierStock <= 0;
+              const stockStatusText = stockLoading
+                ? 'Checking stock...'
+                : tierStock <= 5
+                    ? `${tierStock} left (low stock)`
+                    : `${tierStock} in stock`;
+
+              return (
             <PricingCard
               key={plan.plan}
               title={plan.title}
@@ -519,9 +609,12 @@ function PremiumContent() {
               period={plan.period}
               features={plan.features}
               featured={plan.featured}
-              buttonText={paymentMethod === 'paypal' ? 'Pay with PayPal' : 'Verify & Get Key'}
+              stockStatusText={isOutOfStock ? undefined : stockStatusText}
+              stockStatusVariant={isOutOfStock ? 'out-of-stock' : tierStock <= 5 ? 'low-stock' : 'in-stock'}
+              isOutOfStock={isOutOfStock}
+              buttonText={isOutOfStock ? 'Out of Stock' : paymentMethod === 'paypal' ? 'Pay with PayPal' : 'Verify & Get Key'}
               buttonIcon={
-                paymentMethod === 'paypal' ? (
+                paymentMethod === 'paypal' && !isOutOfStock ? (
                   <CreditCard className="w-4 h-4" />
                 ) : null
               }
@@ -544,6 +637,8 @@ function PremiumContent() {
                 ) : undefined
               }
             />
+              );
+            })()
           ))}
         </section>
 

@@ -138,3 +138,20 @@ WITH
 -- Migration: Add game_selection column to payments
 -- Run this in your Supabase SQL editor if the column doesn't already exist
 ALTER TABLE payments ADD COLUMN IF NOT EXISTS game_selection TEXT[] DEFAULT NULL;
+
+-- Premium stock table
+CREATE TABLE IF NOT EXISTS premium_stock (
+    tier TEXT PRIMARY KEY,
+    stock INT NOT NULL DEFAULT 0 CHECK (stock >= 0),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Optional seed rows
+INSERT INTO premium_stock (tier, stock)
+VALUES ('weekly', 100), ('monthly', 100), ('lifetime', 100)
+ON CONFLICT (tier) DO NOTHING;
+
+ALTER TABLE public.premium_stock ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Enable premium_stock access for service role" ON public.premium_stock FOR ALL USING (true)
+WITH CHECK (true);
