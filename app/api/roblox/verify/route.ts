@@ -31,8 +31,9 @@ export async function POST(req: Request) {
         }
 
         if (requestedTier && ['weekly', 'monthly', 'lifetime'].includes(String(requestedTier).toLowerCase())) {
-            const preCheckStock = await db.getPremiumStock(String(requestedTier).toLowerCase());
-            if (preCheckStock <= 0) {
+            const tier = String(requestedTier).toLowerCase();
+            const methodStocks = await db.getPaymentMethodStocks();
+            if ((methodStocks[tier]?.robux ?? 0) <= 0) {
                 return NextResponse.json({
                     success: false,
                     error: 'This premium plan is out of stock'
@@ -150,7 +151,7 @@ export async function POST(req: Request) {
         const robuxAmount = robuxPriceMap[tier] ?? 0;
 
         // Processing New Purchase OR Renewal
-        const stockDecremented = await db.decrementPremiumStock(tier);
+        const stockDecremented = await db.decrementPaymentMethodStock(tier, 'robux');
         if (!stockDecremented) {
             return NextResponse.json({
                 success: false,

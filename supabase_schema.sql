@@ -155,3 +155,19 @@ ALTER TABLE public.premium_stock ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Enable premium_stock access for service role" ON public.premium_stock FOR ALL USING (true)
 WITH CHECK (true);
+
+-- Migration: Per-payment-method stock (run in Supabase SQL editor)
+-- Step 1: Add payment_method column (default 'global' for existing rows)
+ALTER TABLE premium_stock ADD COLUMN IF NOT EXISTS payment_method TEXT NOT NULL DEFAULT 'global';
+
+-- Step 2: Drop the old single-column PK (tier) and replace with composite (tier, payment_method)
+ALTER TABLE premium_stock DROP CONSTRAINT IF EXISTS premium_stock_pkey;
+ALTER TABLE premium_stock ADD PRIMARY KEY (tier, payment_method);
+
+-- Step 3: Seed per-method rows for Robux, PayPal, GCash (100 stock each)
+INSERT INTO premium_stock (tier, payment_method, stock)
+VALUES
+  ('weekly',   'robux',  100), ('weekly',   'paypal', 100), ('weekly',   'gcash',  100),
+  ('monthly',  'robux',  100), ('monthly',  'paypal', 100), ('monthly',  'gcash',  100),
+  ('lifetime', 'robux',  100), ('lifetime', 'paypal', 100), ('lifetime', 'gcash',  100)
+ON CONFLICT (tier, payment_method) DO NOTHING;

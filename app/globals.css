@@ -90,6 +90,30 @@
   background: var(--accent-hover);
 }
 
+/* Red scrollbar for discontinued script panels */
+.discontinued-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(239 68 68 / 0.6) transparent;
+}
+
+.discontinued-scrollbar::-webkit-scrollbar {
+  width: 5px;
+}
+
+.discontinued-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 4px 0;
+}
+
+.discontinued-scrollbar::-webkit-scrollbar-thumb {
+  background: rgb(239 68 68 / 0.6);
+  border-radius: 10px;
+}
+
+.discontinued-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgb(239 68 68 / 0.9);
+}
+
 /* Base Styles */
 html {
   scroll-behavior: smooth;

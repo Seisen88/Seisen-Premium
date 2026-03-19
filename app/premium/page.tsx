@@ -12,7 +12,13 @@ import Link from 'next/link';
 
 type PaymentMethod = 'paypal' | 'robux' | 'gcash';
 type PremiumTier = 'weekly' | 'monthly' | 'lifetime';
-type PremiumStockMap = Record<PremiumTier, number>;
+type MethodStockMap = Record<PaymentMethod, Record<PremiumTier, number>>;
+
+const defaultMethodStockMap = (): MethodStockMap => ({
+  paypal: { weekly: 0, monthly: 0, lifetime: 0 },
+  robux:  { weekly: 0, monthly: 0, lifetime: 0 },
+  gcash:  { weekly: 0, monthly: 0, lifetime: 0 },
+});
 
 // ... (Plans data same as before, I will include them to be safe)
 const paypalPlans = [
@@ -154,7 +160,7 @@ function PremiumContent() {
       message: string;
       details?: string;
   }>({ isOpen: false, type: 'success', title: '', message: '' });
-  const [stockMap, setStockMap] = useState<PremiumStockMap>({ weekly: 0, monthly: 0, lifetime: 0 });
+  const [stockMap, setStockMap] = useState<MethodStockMap>(defaultMethodStockMap());
   const [stockLoading, setStockLoading] = useState(true);
 
   const searchParams = useSearchParams();
@@ -174,14 +180,16 @@ function PremiumContent() {
     try {
       const response = await fetch('/api/premium-stock', { cache: 'no-store' });
       if (!response.ok) throw new Error('Failed to load stock');
-
       const data = await response.json();
-      if (data?.stocks) {
-        setStockMap({
-          weekly: Number(data.stocks.weekly || 0),
-          monthly: Number(data.stocks.monthly || 0),
-          lifetime: Number(data.stocks.lifetime || 0),
-        });
+      if (data?.methodStocks) {
+        const ms = data.methodStocks;
+        const map = defaultMethodStockMap();
+        for (const method of ['paypal', 'robux', 'gcash'] as PaymentMethod[]) {
+          for (const tier of ['weekly', 'monthly', 'lifetime'] as PremiumTier[]) {
+            map[method][tier] = Number(ms[tier]?.[method] || 0);
+          }
+        }
+        setStockMap(map);
       }
     } catch (error) {
       console.error('Failed to load premium stocks:', error);
@@ -196,7 +204,7 @@ function PremiumContent() {
 
   const getTierStock = (tier: string) => {
     if (tier === 'weekly' || tier === 'monthly' || tier === 'lifetime') {
-      return stockMap[tier];
+      return stockMap[paymentMethod][tier];
     }
     return 0;
   };

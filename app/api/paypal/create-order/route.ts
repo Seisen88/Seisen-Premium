@@ -20,7 +20,8 @@ export async function POST(req: NextRequest) {
     }
 
         const db = new TicketDatabase();
-        const currentStock = await db.getPremiumStock(tier);
+        const methodStocks = await db.getPaymentMethodStocks();
+        const currentStock = methodStocks[tier]?.paypal ?? 0;
         if (currentStock <= 0) {
             return NextResponse.json({ error: 'This premium plan is out of stock' }, { status: 409 });
         }

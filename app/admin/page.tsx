@@ -40,6 +40,13 @@ interface Stats {
 }
 
 type PremiumTier = 'weekly' | 'monthly' | 'lifetime';
+type PaymentMethod = 'robux' | 'paypal' | 'gcash';
+
+const PAYMENT_METHODS: { id: PaymentMethod; label: string; color: string; accent: string }[] = [
+  { id: 'robux',  label: 'Robux',  color: 'amber',  accent: '#fbbf24' },
+  { id: 'paypal', label: 'PayPal', color: 'blue',   accent: '#0070ba' },
+  { id: 'gcash',  label: 'GCash',  color: 'green',  accent: '#22c55e' },
+];
 
 export default function AdminPage() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -64,18 +71,24 @@ export default function AdminPage() {
   const [ticketsPage, setTicketsPage] = useState(1);
   const [selectedScript, setSelectedScript] = useState<any | null>(null);
   const [bulkFeatures, setBulkFeatures] = useState('');
-  const [premiumStock, setPremiumStock] = useState<Record<PremiumTier, number>>({
-    weekly: 0,
-    monthly: 0,
-    lifetime: 0,
-  });
-  const [stockDraft, setStockDraft] = useState<Record<PremiumTier, string>>({
-    weekly: '0',
-    monthly: '0',
-    lifetime: '0',
-  });
   const [stockLoading, setStockLoading] = useState(false);
-  const [savingStockTier, setSavingStockTier] = useState<PremiumTier | null>(null);
+
+  type MethodStockMap = Record<PremiumTier, Record<PaymentMethod, number>>;
+  type MethodDraftMap = Record<PremiumTier, Record<PaymentMethod, string>>;
+  const defaultMethodStock = (): MethodStockMap => ({
+    weekly:   { robux: 0, paypal: 0, gcash: 0 },
+    monthly:  { robux: 0, paypal: 0, gcash: 0 },
+    lifetime: { robux: 0, paypal: 0, gcash: 0 },
+  });
+  const defaultMethodDraft = (): MethodDraftMap => ({
+    weekly:   { robux: '0', paypal: '0', gcash: '0' },
+    monthly:  { robux: '0', paypal: '0', gcash: '0' },
+    lifetime: { robux: '0', paypal: '0', gcash: '0' },
+  });
+  const [methodStock, setMethodStock] = useState<MethodStockMap>(defaultMethodStock());
+  const [methodDraft, setMethodDraft] = useState<MethodDraftMap>(defaultMethodDraft());
+  const [savingMethodKey, setSavingMethodKey] = useState<string | null>(null);
+
   const ITEMS_PER_PAGE = 5;
   const TABLE_ITEMS_PER_PAGE = 10;
 
@@ -130,28 +143,24 @@ export default function AdminPage() {
   const fetchPremiumStock = async (token: string) => {
     try {
       setStockLoading(true);
-      const res = await fetch(`${getApiUrl()}/api/admin/premium-stock`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
+      const res = await fetch(`${getApiUrl()}/api/admin/premium-stock?scope=paymentMethod`, {
+        headers: { 'Authorization': `Bearer ${token}` },
       });
-
-      if (!res.ok) throw new Error('Failed to fetch premium stock');
-
-      const data = await res.json();
-      const stocks = data?.stocks || {};
-      const normalized = {
-        weekly: Number(stocks.weekly || 0),
-        monthly: Number(stocks.monthly || 0),
-        lifetime: Number(stocks.lifetime || 0),
-      };
-
-      setPremiumStock(normalized);
-      setStockDraft({
-        weekly: String(normalized.weekly),
-        monthly: String(normalized.monthly),
-        lifetime: String(normalized.lifetime),
-      });
+      if (res.ok) {
+        const methodData = await res.json();
+        const ms = methodData?.methodStocks || {};
+        const newStock = defaultMethodStock();
+        const newDraft = defaultMethodDraft();
+        for (const tier of ['weekly', 'monthly', 'lifetime'] as PremiumTier[]) {
+          for (const m of ['robux', 'paypal', 'gcash'] as PaymentMethod[]) {
+            const val = Number(ms[tier]?.[m] || 0);
+            newStock[tier][m] = val;
+            newDraft[tier][m] = String(val);
+          }
+        }
+        setMethodStock(newStock);
+        setMethodDraft(newDraft);
+      }
     } catch (error) {
       console.error('Error fetching premium stock:', error);
     } finally {
@@ -159,48 +168,50 @@ export default function AdminPage() {
     }
   };
 
-  const saveStock = async (tier: PremiumTier) => {
+  const saveMethodStock = async (tier: PremiumTier, method: PaymentMethod) => {
     try {
       const token = localStorage.getItem('adminToken');
       if (!token) return;
 
-      const value = Number(stockDraft[tier]);
+      const value = Number(methodDraft[tier][method]);
       if (!Number.isInteger(value) || value < 0) {
         alert('Stock must be a non-negative integer.');
         return;
       }
 
-      setSavingStockTier(tier);
+      const key = `${method}-${tier}`;
+      setSavingMethodKey(key);
+
       const res = await fetch(`${getApiUrl()}/api/admin/premium-stock`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify({ tier, stock: value }),
+        body: JSON.stringify({ tier, method, stock: value }),
       });
 
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || 'Failed to update stock');
 
-      const updated = {
-        weekly: Number(data.stocks.weekly || 0),
-        monthly: Number(data.stocks.monthly || 0),
-        lifetime: Number(data.stocks.lifetime || 0),
-      };
-
-      setPremiumStock(updated);
-      setStockDraft({
-        weekly: String(updated.weekly),
-        monthly: String(updated.monthly),
-        lifetime: String(updated.lifetime),
-      });
+      const ms = data.methodStocks || {};
+      const newStock = defaultMethodStock();
+      const newDraft = defaultMethodDraft();
+      for (const t of ['weekly', 'monthly', 'lifetime'] as PremiumTier[]) {
+        for (const m of ['robux', 'paypal', 'gcash'] as PaymentMethod[]) {
+          const val = Number(ms[t]?.[m] || 0);
+          newStock[t][m] = val;
+          newDraft[t][m] = String(val);
+        }
+      }
+      setMethodStock(newStock);
+      setMethodDraft(newDraft);
     } catch (error) {
-      console.error('Error saving stock:', error);
+      console.error('Error saving method stock:', error);
       const message = error instanceof Error ? error.message : 'Failed to save stock';
       alert(message);
     } finally {
-      setSavingStockTier(null);
+      setSavingMethodKey(null);
     }
   };
 
@@ -1082,49 +1093,81 @@ export default function AdminPage() {
 
 
         {activeTab === 'settings' && (
-          <Card className="p-6 space-y-6">
-            <div>
-              <h3 className="text-lg font-semibold text-white mb-1">Premium Stock Management</h3>
-              <p className="text-gray-500 text-sm">Set available stock for each premium tier. Out-of-stock tiers are automatically disabled on the premium page.</p>
-            </div>
-
-            {stockLoading ? (
-              <div className="text-gray-400 text-sm flex items-center gap-2">
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Loading stock...
+            <Card className="p-6 space-y-6">
+              <div>
+                <h3 className="text-lg font-semibold text-white mb-1">Stock by Payment Method</h3>
+                <p className="text-gray-500 text-sm">Set individual stock for Robux, PayPal, and GCash per tier.</p>
               </div>
-            ) : (
-              <div className="grid md:grid-cols-3 gap-4">
-                {(['weekly', 'monthly', 'lifetime'] as PremiumTier[]).map((tier) => (
-                  <div key={tier} className="bg-[#101010] border border-[#2a2a2a] rounded-xl p-4 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <p className="text-white font-semibold capitalize">{tier}</p>
-                      <span className={`text-xs px-2 py-1 rounded border ${premiumStock[tier] > 0 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-red-500/10 text-red-400 border-red-500/30'}`}>
-                        {premiumStock[tier] > 0 ? 'In Stock' : 'Out of Stock'}
-                      </span>
+
+              {stockLoading ? (
+                <div className="text-gray-400 text-sm flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Loading stock...
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {PAYMENT_METHODS.map(({ id: methodId, label, accent }) => (
+                    <div key={methodId}>
+                      <div className="flex items-center gap-2 mb-3">
+                        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: accent }} />
+                        <p className="text-white font-semibold text-sm">{label}</p>
+                      </div>
+                      <div className="grid md:grid-cols-3 gap-4">
+                        {(['weekly', 'monthly', 'lifetime'] as PremiumTier[]).map((tier) => {
+                          const saveKey = `${methodId}-${tier}`;
+                          const currentVal = methodStock[tier][methodId];
+                          return (
+                            <div
+                              key={tier}
+                              className="bg-[#101010] border border-[#2a2a2a] rounded-xl p-4 space-y-3"
+                            >
+                              <div className="flex items-center justify-between">
+                                <p className="text-white font-semibold capitalize text-sm">{tier}</p>
+                                <span
+                                  className={`text-xs px-2 py-1 rounded border ${
+                                    currentVal > 0
+                                      ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                                      : 'bg-red-500/10 text-red-400 border-red-500/30'
+                                  }`}
+                                >
+                                  {currentVal > 0 ? 'In Stock' : 'Out of Stock'}
+                                </span>
+                              </div>
+
+                              <input
+                                type="number"
+                                min={0}
+                                value={methodDraft[tier][methodId]}
+                                onChange={(e) =>
+                                  setMethodDraft((prev) => ({
+                                    ...prev,
+                                    [tier]: { ...prev[tier], [methodId]: e.target.value },
+                                  }))
+                                }
+                                className="w-full p-2.5 bg-[#141414] border border-[#2a2a2a] rounded-lg text-white focus:outline-none focus:border-emerald-500/50"
+                              />
+
+                              <Button
+                                className="w-full"
+                                onClick={() => saveMethodStock(tier, methodId)}
+                                disabled={savingMethodKey === saveKey}
+                              >
+                                {savingMethodKey === saveKey ? (
+                                  <Loader2 className="w-4 h-4 animate-spin" />
+                                ) : (
+                                  <Save className="w-4 h-4" />
+                                )}
+                                Save
+                              </Button>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
-
-                    <input
-                      type="number"
-                      min={0}
-                      value={stockDraft[tier]}
-                      onChange={(e) => setStockDraft((prev) => ({ ...prev, [tier]: e.target.value }))}
-                      className="w-full p-2.5 bg-[#141414] border border-[#2a2a2a] rounded-lg text-white focus:outline-none focus:border-emerald-500/50"
-                    />
-
-                    <Button
-                      className="w-full"
-                      onClick={() => saveStock(tier)}
-                      disabled={savingStockTier === tier}
-                    >
-                      {savingStockTier === tier ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                      Save Stock
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
+                  ))}
+                </div>
+              )}
+            </Card>
         )}
       </div>
     </div>

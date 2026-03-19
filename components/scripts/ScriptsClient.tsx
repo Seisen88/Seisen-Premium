@@ -272,12 +272,19 @@ export default function ScriptsClient({ initialScripts }: ScriptsClientProps) {
                   <TiltCard>
                     <Card
                       variant="hover"
-                      className={`group relative overflow-hidden bg-[#101010] border-[#1f1f1f] cursor-pointer transition-all ${
-                        isSelected ? 'ring-2 ring-[var(--accent)] z-50' : selectedScript ? 'blur-sm opacity-60' : ''
+                      className={`group relative overflow-hidden cursor-pointer transition-all ${
+                        isSelected ? 'z-50' : selectedScript ? 'blur-sm opacity-60' : ''
                       }`}
                       onClick={(e) => handleScriptClick(e, script)}
                       style={{
-                        height: `${getCardHeight(script.id)}px`
+                        height: `${getCardHeight(script.id)}px`,
+                        ...(script.status === 'Discontinued' ? {
+                          backgroundColor: 'rgb(69 10 10 / 0.3)',
+                          border: isSelected ? '2px solid rgb(239 68 68 / 0.8)' : '1px solid rgb(239 68 68 / 0.4)',
+                          boxShadow: isSelected ? '0 0 0 2px rgb(239 68 68 / 0.4), 0 0 20px rgb(239 68 68 / 0.2)' : '0 0 20px rgb(239 68 68 / 0.1)',
+                        } : {
+                          ...(isSelected ? { outline: '2px solid var(--accent)', outlineOffset: '0px' } : {})
+                        })
                       }}
                     >
                       {/* Full Image Background */}
@@ -295,7 +302,16 @@ export default function ScriptsClient({ initialScripts }: ScriptsClientProps) {
                       )}
 
                       {/* Overlay Gradient */}
-                      <div className="absolute inset-0 bg-gradient-to-t from-black via-black/60 to-transparent" />
+                      <div className={`absolute inset-0 bg-gradient-to-t from-black via-black/60 to-transparent ${script.status === 'Discontinued' ? 'opacity-80' : ''}`} />
+
+                      {/* Discontinued Banner */}
+                      {script.status === 'Discontinued' && (
+                        <div className="absolute top-3 left-0 right-0 flex justify-center z-30">
+                          <span className="px-3 py-1 rounded-full text-xs font-bold bg-red-500/20 text-red-400 border border-red-500/40 backdrop-blur-sm">
+                            Discontinued
+                          </span>
+                        </div>
+                      )}
 
                       {/* Name Overlay */}
                       <div className="absolute bottom-0 left-0 right-0 p-5 z-20">
@@ -344,7 +360,7 @@ export default function ScriptsClient({ initialScripts }: ScriptsClientProps) {
                     data-details-panel="true"
                     style={{ 
                         background: `linear-gradient(135deg, #1a1a1a 0%, #0f0f0f 100%)`,
-                        borderColor: 'var(--accent)',
+                        borderColor: selectedScript.status === 'Discontinued' ? 'rgb(239 68 68 / 0.6)' : 'var(--accent)',
                         borderWidth: '2px',
                         borderStyle: 'solid',
                         maxHeight: '750px',
@@ -353,11 +369,13 @@ export default function ScriptsClient({ initialScripts }: ScriptsClientProps) {
                         left: clickedCardRect ? (detailsPosition === 'right' ? (clickedCardRect.left + clickedCardRect.width + 24) : (clickedCardRect.left - 420 - 24)) : 0,
                     }}
                 >
-                      {/* Decorative gradient overlay with accent color */}
+                      {/* Decorative gradient overlay */}
                       <div 
                         className="absolute inset-0 pointer-events-none opacity-20"
                         style={{
-                          background: `radial-gradient(circle at top right, var(--accent), transparent 60%)`
+                          background: selectedScript.status === 'Discontinued'
+                            ? `radial-gradient(circle at top right, rgb(239 68 68), transparent 60%)`
+                            : `radial-gradient(circle at top right, var(--accent), transparent 60%)`
                         }}
                       ></div>
 
@@ -372,7 +390,7 @@ export default function ScriptsClient({ initialScripts }: ScriptsClientProps) {
                         <X className="w-5 h-5" />
                       </button>
                       
-                      <div className="relative p-8 h-full overflow-y-auto custom-scrollbar">
+                      <div className={`relative p-8 h-full overflow-y-auto ${selectedScript.status === 'Discontinued' ? 'discontinued-scrollbar' : 'custom-scrollbar'}`}>
 
                         {/* Mini Card Preview with Glow */}
                         <div className="mb-8 relative">
@@ -397,8 +415,12 @@ export default function ScriptsClient({ initialScripts }: ScriptsClientProps) {
 
                         {/* Type Badge with Gradient */}
                         <div className="mb-8 text-center">
-                          <span className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-bold bg-gradient-to-r from-black/30 to-black/20 backdrop-blur-md text-white shadow-xl border border-white/20">
-                            <div className="w-2 h-2 rounded-full bg-white/60"></div>
+                          <span className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-bold backdrop-blur-md shadow-xl ${
+                            selectedScript.status === 'Discontinued'
+                              ? 'bg-red-500/20 text-red-400 border border-red-500/40'
+                              : 'bg-gradient-to-r from-black/30 to-black/20 text-white border border-white/20'
+                          }`}>
+                            <div className={`w-2 h-2 rounded-full ${selectedScript.status === 'Discontinued' ? 'bg-red-400' : 'bg-white/60'}`}></div>
                             {selectedScript.displayType || selectedScript.type}
                           </span>
                         </div>
@@ -479,18 +501,20 @@ export default function ScriptsClient({ initialScripts }: ScriptsClientProps) {
                       data-details-panel="true"
                       style={{ 
                         background: `linear-gradient(135deg, #1a1a1a 0%, #0f0f0f 100%)`,
-                        borderColor: 'var(--accent)',
+                        borderColor: selectedScript.status === 'Discontinued' ? 'rgb(239 68 68 / 0.6)' : 'var(--accent)',
                         borderWidth: '2px',
                         borderStyle: 'solid',
                         maxHeight: '90vh',
                         height: 'auto'
                       }}
                     >
-                      {/* Decorative gradient overlay with accent color */}
+                      {/* Decorative gradient overlay */}
                       <div 
                         className="absolute inset-0 pointer-events-none opacity-20"
                         style={{
-                          background: `radial-gradient(circle at top right, var(--accent), transparent 60%)`
+                          background: selectedScript.status === 'Discontinued'
+                            ? `radial-gradient(circle at top right, rgb(239 68 68), transparent 60%)`
+                            : `radial-gradient(circle at top right, var(--accent), transparent 60%)`
                         }}
                       ></div>
 
@@ -505,7 +529,7 @@ export default function ScriptsClient({ initialScripts }: ScriptsClientProps) {
                         <X className="w-5 h-5" />
                       </button>
                       
-                      <div className="relative p-6 h-full overflow-y-auto custom-scrollbar">
+                      <div className={`relative p-6 h-full overflow-y-auto ${selectedScript.status === 'Discontinued' ? 'discontinued-scrollbar' : 'custom-scrollbar'}`}>
 
                         {/* Mini Card Preview with Glow */}
                         <div className="mb-6 relative">
@@ -529,8 +553,12 @@ export default function ScriptsClient({ initialScripts }: ScriptsClientProps) {
 
                         {/* Type Badge with Gradient */}
                         <div className="mb-6 text-center">
-                          <span className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold bg-gradient-to-r from-black/30 to-black/20 backdrop-blur-md text-white shadow-xl border border-white/20">
-                            <div className="w-2 h-2 rounded-full bg-white/60"></div>
+                          <span className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold backdrop-blur-md shadow-xl ${
+                            selectedScript.status === 'Discontinued'
+                              ? 'bg-red-500/20 text-red-400 border border-red-500/40'
+                              : 'bg-gradient-to-r from-black/30 to-black/20 text-white border border-white/20'
+                          }`}>
+                            <div className={`w-2 h-2 rounded-full ${selectedScript.status === 'Discontinued' ? 'bg-red-400' : 'bg-white/60'}`}></div>
                             {selectedScript.displayType || selectedScript.type}
                           </span>
                         </div>

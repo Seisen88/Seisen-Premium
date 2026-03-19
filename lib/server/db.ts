@@ -324,81 +324,61 @@ export class TicketDatabase {
     return this.premiumTiers.includes(normalized) ? normalized : null;
   }
 
-  private async ensurePremiumStockRows() {
-    const { data, error } = await this.client
-      .from('premium_stock')
-      .select('tier');
 
-    if (error) {
-      console.error('Error reading premium stock rows:', error);
-      return;
-    }
+  // --- Per-payment-method stock ---
+  private readonly paymentMethods = ['robux', 'paypal', 'gcash'];
 
-    const existing = new Set((data || []).map((row: any) => row.tier));
-    const missing = this.premiumTiers
-      .filter((tier) => !existing.has(tier))
-      .map((tier) => ({ tier, stock: 100 }));
-
-    if (missing.length > 0) {
-      const { error: insertError } = await this.client
-        .from('premium_stock')
-        .insert(missing);
-
-      if (insertError) {
-        console.error('Error creating default premium stock rows:', insertError);
-      }
-    }
+  private normalizeMethod(method: string) {
+    const m = (method || '').toLowerCase();
+    return this.paymentMethods.includes(m) ? m : null;
   }
 
-  async getPremiumStocks(): Promise<Record<string, number>> {
-    await this.ensurePremiumStockRows();
-
-    const fallback = { weekly: 0, monthly: 0, lifetime: 0 };
-
+  async getPaymentMethodStocks(): Promise<Record<string, Record<string, number>>> {
     const { data, error } = await this.client
       .from('premium_stock')
-      .select('tier, stock');
+      .select('tier, payment_method, stock')
+      .in('payment_method', this.paymentMethods);
 
-    if (error) {
-      console.error('Error fetching premium stocks:', error);
-      return fallback;
+    const result: Record<string, Record<string, number>> = {};
+
+    for (const tier of this.premiumTiers) {
+      result[tier] = { robux: 0, paypal: 0, gcash: 0 };
     }
 
-    const map = { ...fallback };
+    if (error) {
+      console.error('Error fetching payment method stocks:', error);
+      return result;
+    }
+
     for (const row of data || []) {
-      if (this.premiumTiers.includes(row.tier)) {
-        map[row.tier as 'weekly' | 'monthly' | 'lifetime'] = Number(row.stock || 0);
+      if (result[row.tier] && this.paymentMethods.includes(row.payment_method)) {
+        result[row.tier][row.payment_method] = Number(row.stock || 0);
       }
     }
 
-    return map;
-  }
-
-  async getPremiumStock(tier: string): Promise<number> {
-    const normalizedTier = this.normalizeTier(tier);
-    if (!normalizedTier) return 0;
-
-    await this.ensurePremiumStockRows();
-
-    const { data, error } = await this.client
-      .from('premium_stock')
-      .select('stock')
-      .eq('tier', normalizedTier)
-      .single();
-
-    if (error) {
-      console.error('Error fetching premium stock for tier:', normalizedTier, error);
-      return 0;
+    // Ensure all rows exist (seed missing ones)
+    const existing = new Set((data || []).map((r: any) => `${r.tier}:${r.payment_method}`));
+    const missing: { tier: string; payment_method: string; stock: number }[] = [];
+    for (const tier of this.premiumTiers) {
+      for (const method of this.paymentMethods) {
+        if (!existing.has(`${tier}:${method}`)) {
+          missing.push({ tier, payment_method: method, stock: 100 });
+        }
+      }
+    }
+    if (missing.length > 0) {
+      await this.client.from('premium_stock').insert(missing);
     }
 
-    return Number(data?.stock || 0);
+    return result;
   }
 
-  async setPremiumStock(tier: string, stock: number) {
+  async setPaymentMethodStock(tier: string, method: string, stock: number) {
     const normalizedTier = this.normalizeTier(tier);
-    if (!normalizedTier) {
-      throw new Error('Invalid tier');
-    }
+    const normalizedMethod = this.normalizeMethod(method);
+
+    if (!normalizedTier) throw new Error('Invalid tier');
+    if (!normalizedMethod) throw new Error('Invalid payment method');
 
     const safeStock = Number.isFinite(stock) ? Math.max(0, Math.floor(stock)) : 0;
 
@@ -406,68 +386,66 @@ export class TicketDatabase {
       .from('premium_stock')
       .upsert({
         tier: normalizedTier,
+        payment_method: normalizedMethod,
         stock: safeStock,
         updated_at: new Date().toISOString()
-      }, { onConflict: 'tier' })
-      .select('tier, stock')
+      }, { onConflict: 'tier,payment_method' })
+      .select('tier, payment_method, stock')
       .single();
 
     if (error) {
-      console.error('Error setting premium stock:', error);
+      console.error('Error setting payment method stock:', error);
       throw error;
     }
 
     return data;
   }
 
-  async decrementPremiumStock(tier: string): Promise<boolean> {
-    const normalizedTier = this.normalizeTier(tier);
-    if (!normalizedTier) return false;
 
-    await this.ensurePremiumStockRows();
+
+
+  async decrementPaymentMethodStock(tier: string, method: string): Promise<boolean> {
+    const normalizedTier = this.normalizeTier(tier);
+    const normalizedMethod = this.normalizeMethod(method);
+    if (!normalizedTier || !normalizedMethod) return false;
 
     for (let attempt = 0; attempt < 3; attempt++) {
       const { data: current, error: readError } = await this.client
         .from('premium_stock')
         .select('stock')
         .eq('tier', normalizedTier)
+        .eq('payment_method', normalizedMethod)
         .single();
 
       if (readError) {
-        console.error('Error reading stock before decrement:', readError);
+        console.error('Error reading method stock before decrement:', readError);
         return false;
       }
 
       const currentStock = Number(current?.stock || 0);
-      if (currentStock <= 0) {
-        return false;
-      }
+      if (currentStock <= 0) return false;
 
       const { data: updated, error: updateError } = await this.client
         .from('premium_stock')
-        .update({
-          stock: currentStock - 1,
-          updated_at: new Date().toISOString()
-        })
+        .update({ stock: currentStock - 1, updated_at: new Date().toISOString() })
         .eq('tier', normalizedTier)
+        .eq('payment_method', normalizedMethod)
         .eq('stock', currentStock)
         .select('tier')
         .maybeSingle();
 
       if (updateError) {
-        console.error('Error decrementing premium stock:', updateError);
+        console.error('Error decrementing method stock:', updateError);
         return false;
       }
 
-      if (updated) {
-        return true;
-      }
+      if (updated) return true;
     }
 
     return false;
   }
 
-  // --- Visitor Stats ---
+
   async getVisitorStats() {
     // We now use a single 'global_counter' row for all stats
     // But we might want to respect legacy data if we want.

@@ -19,7 +19,7 @@ export async function fetchScripts(): Promise<Script[]> {
     const [freeRes, premiumRes, discontinuedRes] = await Promise.all([
       fetch('https://raw.githubusercontent.com/Ken-884/roblox/refs/heads/main/gamelist.lua', { next: { revalidate: 3600 } }),
       fetch('https://raw.githubusercontent.com/Ken-884/roblox/refs/heads/main/premium/gamelist.lua', { next: { revalidate: 3600 } }),
-      fetch('https://raw.githubusercontent.com/Ken-884/roblox/refs/heads/main/discontinued.lua', { next: { revalidate: 3600 } })
+      fetch('https://raw.githubusercontent.com/Ken-884/roblox/refs/heads/main/discontinued.lua', { next: { revalidate: 60 } })
     ]);
 
     const [freeCode, premiumCode, discontinuedCode] = await Promise.all([
